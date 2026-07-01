@@ -1,0 +1,196 @@
+# HWPX Form Fill Workflow
+
+> 부모 스킬: **hwpx** (절대 규칙·디자인 규칙·Critical Rules·Versions 표는 거기에 있음).
+> 이 파일은 hwpx 스킬의 *양식 채우기 워크플로우* 전용 sub-document — Claude Code skill discovery 의 별도 스킬은 아님.
+> SKILL.md 본문에서 `워크플로우 [3]` 섹션이 이 파일을 가리킨다.
+
+## 적용 조건
+
+- 입력: 기존 `.hwpx` 양식 파일 (사용자 제공 또는 워크스페이스 등록 양식)
+- 출력: 데이터가 채워진 `.hwpx` 결과물 (1매 표준이면 정확히 1페이지)
+- 결정사항: 다음 채팅에서 자동 복원되도록 워크스페이스에 저장
+
+## 절대 전제
+
+1. **모든 채우기 후 SVG/PNG 프리뷰 시각 확인 필수** (생략 금지 — 부모 스킬 절대 규칙 #7)
+2. **page-guard 통과 게이트** (v0.16.0+) — exit 0 일 때만 완료 처리 (Critical Rule #12·#13)
+3. **워크스페이스 박제** (v0.17.0+) — 최초 등록 시 메타·결정사항을 박제, 매 세션 종료 시 `save_session` 으로 누적
+
+## 학습 루프 (왜 이렇게 단계가 짜였는가)
+
+```
+┌─────────── 세션 시작 ───────────┐
+│  workspace_list()                │  ← 등록 양식 확인 (자동 / hook)
+│        ↓                         │
+│  template_context(name)          │  ← 결정사항·이전값 자동 흡수
+│        ↓                         │
+│  바로 채우기 (Step 0 재판정 불필요)│
+└──────────────┬──────────────────┘
+               ↓
+         (Step A → G 진행)
+               ↓
+┌─────────── 세션 종료 ───────────┐
+│  save_session(data, decision)    │  ← 한 번 호출로 history+decisions 갱신
+│        ↓                         │
+│  decisions.md / history.json     │
+│  outputs/YYYY-MM-DD_<key>.hwpx  │
+└──────────────┬──────────────────┘
+               ↓
+       (다음 세션 시작 시)
+               ↓
+        이번 결정사항이 자동 복원
+        스킬이 스스로 더 풍부해진다
+
+루프가 깨지는 곳:
+  - Step 0 건너뛰면      → 같은 양식을 매번 처음부터 재판정
+  - Step G 건너뛰면      → 이번 합의가 다음 세션에서 사라짐 (다이어리제이션 끊김)
+  - page-guard 건너뛰면  → 완성도 무관 결과물 누적, 신뢰 저하
+```
+
+---
+
+## 최초 등록 시 (한 번만, 복붙용)
+
+새 양식을 처음 만났을 때 — 메타 인지 5질문 → 사용자 확인 → 다음 두 줄로 워크스페이스 박제. 이후 세션부터는 Step 0 의 자동 복원이 작동.
+
+```bash
+pyhwpxlib template add <source.hwpx> --name <key>
+pyhwpxlib template annotate <key> \
+    --description "<양식 설명 한 줄>" \
+    --structure A|B \
+    --page-standard 1page|free
+```
+
+> 필드 매핑: `--description` (한 줄 설명) · `--structure` (A=인접 셀, B=같은 셀) · `--page-standard` (1page=1매 강제, free=자유). 추가 자유 메모는 `--notes`.
+
+---
+
+## Step 0: 컨텍스트 자동 로드 (등록 양식이면 우선)
+
+```python
+from pyhwpxlib.templates.context import load_context
+ctx = load_context(name)   # 결정사항·이전 채우기 값·구조 타입·페이지 표준 자동 복원
+print(ctx.to_markdown())
+```
+또는 CLI: `pyhwpxlib template context <name>`.
+
+**이전 채팅의 합의가 살아 있다 → 사용자가 양식을 다시 업로드하거나 설명할 필요 없음.**
+
+미등록이면 → Step 0' 메타 인지로.
+
+## Step 0': 메타 인지 (미등록 양식만)
+
+양식은 페이지 표준이 강하므로 5질문 필수 (`references/form_automation.md` 상단 참조):
+
+1. 이 양식은 무엇인가? (지급조서·검수확인서·신청서·동의서·증빙·계약서…)
+2. 누가 채우고 누가 받는가?
+3. 페이지 표준이 있는가? (1매 강제 / 자유)
+4. (예시) 페이지가 있나? — 결과물에선 보통 제거
+5. 미리 인쇄된 항목? — 사업명·기관명·도장 자리는 보존
+
+확인 후 **워크스페이스 등록** (다음 채팅에서 자동 복원되도록):
+```bash
+pyhwpxlib template add <source.hwpx> --name <key>
+pyhwpxlib template annotate <key> --description "<무엇>" --structure-type A|B --page-standard 1page|free
+```
+
+## Step A: 프리뷰 렌더링 → 시각 분석
+
+PNG 로 양식 페이지 렌더링 → Read tool 로 직접 확인.
+
+```python
+from pyhwpxlib.api import render_to_png
+png = render_to_png("source.hwpx", page=0)        # → source_preview_p0.png (v0.17.3+)
+```
+또는 CLI: `pyhwpxlib png source.hwpx`. **`render_page_svg(embed_fonts=True)` + cairosvg 조합은 한글 깨짐 (cairosvg `@font-face` 한계). PNG 가 필요하면 `render_to_png()` 만 사용.**
+
+## Step B: 필드 입력 요청
+
+`ctx.recent_data` 가 있으면 보여주고 재사용/일부 수정 옵션 제안.
+
+## Step C: 구조 판정 — 인접 셀(A) vs 같은 셀(B)
+
+- **구조 A** (label 셀과 값 셀이 분리): `pyhwpxlib.api.fill_by_labels()` 또는 `fill_template()`
+- **구조 B** (label + 값이 같은 셀, "성 명: ___" 형태): `unpack → 원본 문자열 교체 → pack`
+- 판정 결과는 **반드시 워크스페이스에 박제** (Step G):
+  ```
+  template annotate <key> --structure-type A|B
+  ```
+
+## Step D: 채우기 검증 — 게이팅 (중간 vs 최종, v0.18.0+)
+
+**중간 단계 — `check_fill` (~10ms, 권장):**
+채우기 데이터를 손볼 때마다 PNG를 생성하지 마세요. XML-level 검증으로 충분합니다.
+
+```bash
+pyhwpxlib check-fill <name> -d data.json --json
+# exit 0 = 모든 필드 채워지고 placeholder 없음
+# exit 1 = empty 또는 placeholder 잔존 — JSON에 어떤 키인지 표시됨
+```
+
+또는 MCP `hwpx_check_fill(name, data_json)` 호출. schema 등록된 양식이면
+schema vs data 비교로 누락 키를 정확히 보고, 미등록이면 `{{key}}`/`___` 패턴 폴백.
+
+**최종 단계만 — `render_to_png` (~1s, 1회):**
+`is_complete: true` 가 된 다음에만 PNG 렌더링 → Read tool 시각 확인 → 사용자에게 Whale 검증 요청.
+
+**왜 게이팅이 필요한가**: 5장 fill-and-verify 시나리오에서 매 step마다 PNG를 만들면 ~6초·25K 토큰
+소모. check-fill 우선 + 최종 PNG만 → 컴퓨트 -83%, 토큰 -60% (v0.18.0 측정).
+
+> ❌ 안티 패턴: "데이터 한 줄 바꿀 때마다 hwpx_render_png 호출" → 토큰·시간 모두 낭비.
+> 시각 확인은 사용자가 명시 요청한 시점 또는 최종 1회만.
+
+## Step E: 1페이지 fit 검증 (1매 표준 양식)
+
+- `page_count == 1` 인지 확인
+- 넘치면 `GongmunBuilder(autofit=True)` 로 코드 위임 (폰트/줄간격/셀 높이 조정 알고리즘은 결정론 영역 — LLM이 mm 단위 임의 결정 금지)
+- autofit 후에도 실패 → 사용자에게 보고하고 수동 조정 요청
+
+## Step F: page-guard 통과 (필수 게이트)
+
+```bash
+pyhwpxlib page-guard --reference original_form.hwpx --output filled.hwpx
+# exit 0 (PASS) 일 때만 완료 처리. exit 1 (FAIL) 시 텍스트 압축 / autofit 재시도
+```
+
+## Step G: 세션 종료 — 결정사항·이력 한 번에 박제 (생략 금지)
+
+다이어리제이션 루프의 마지막 자동 잠금장치. **단일 MCP 호출** 로 끝.
+
+```
+hwpx_template_save_session(
+  name="<key>",
+  data='<채운 데이터 JSON>',
+  decision="이번 채팅에서 새로 합의한 규칙 (예: '프로젝트명 필드는 줄바꿈 금지')"
+)
+```
+
+내부 동작:
+- `data` 가 있으면 → `history.json` 에 FIFO 10건으로 누적, `outputs/YYYY-MM-DD_<key>.hwpx` 자동 명명
+- `decision` 이 있으면 → `decisions.md` 최상단에 오늘 날짜 블록으로 추기
+- 둘 다 비어 있으면 → no-op (`{"saved": false}` 반환)
+
+CLI 대안 (MCP 미사용 시):
+```bash
+pyhwpxlib template log-fill <key> --data '<json>'
+pyhwpxlib template annotate <key> --decision "<note>"
+```
+
+> **다음 세션에 이 판단이 자동 복원됩니다** — 이게 컨텍스트 지속성의 본질.
+
+---
+
+## 안티 패턴
+
+- ❌ Step F (page-guard) 건너뛰고 "완료" 보고 → Critical Rule #13 위반
+- ❌ Step D 에서 매 데이터 변경마다 PNG 생성 → 토큰·시간 낭비. 중간엔 `check-fill` (~10ms)만 (v0.18.0+)
+- ❌ Step E 에서 LLM 이 폰트 size 를 mm 단위로 임의 결정 → 결정론 영역 침범
+- ❌ Step G 누락 → 다음 채팅에서 같은 양식을 처음부터 재판정해야 함 (다이어리제이션 깨짐)
+- ❌ 구조 B 양식에 `fill_by_labels()` 사용 → 빈 칸이 채워지지 않음 (label+값 한 셀이라서)
+- ❌ "(예시)" 페이지를 결과물에서 제거하지 않음 → 1매가 2매로 부풀음
+
+## 관련 문서
+
+- `references/form_automation.md` — fill_template / batch_generate / schema_extraction 상세
+- `references/HWPX_RULEBOOK.md` — Critical Rules #10~#13 (의도 룰)
+- 부모 `SKILL.md` — 절대 규칙, 디자인 규칙, Versions 표

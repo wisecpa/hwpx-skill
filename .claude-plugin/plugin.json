@@ -1,0 +1,9 @@
+{
+  "name": "hwpx-skill",
+  "version": "0.1.0",
+  "description": "한글(HWP/HWPX) 문서 생성·편집·양식 자동화 스킬. 새 문서 만들기, 기존 문서 편집, 양식 채우기, 공문서 작성, HWP→HWPX 변환을 지원합니다.",
+  "author": {
+    "name": "세무회계 현지"
+  },
+  "keywords": ["hwpx", "hwp", "한글", "한컴", "공문서", "양식", "OWPML"]
+}
