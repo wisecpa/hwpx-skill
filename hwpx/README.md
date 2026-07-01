@@ -1,6 +1,6 @@
 # HWPX 스킬 플러그인
 
-한글(HWP/HWPX) 문서를 Claude Code에서 직접 생성·편집·자동화하는 스킬입니다.
+한글(HWP/HWPX) 문서를 Claude Code 및 Claude Cowork에서 직접 생성·편집·자동화하는 스킬입니다.
 
 ## 사전 설치 필수
 
@@ -23,7 +23,7 @@ pip install pyhwpxlib
 
 ## 사용법
 
-Claude Code에서 hwp/hwpx 파일을 언급하거나 아래 키워드를 사용하면 자동으로 활성화됩니다.
+Claude Code 또는 Cowork에서 hwp/hwpx 파일을 언급하거나 아래 키워드를 사용하면 자동으로 활성화됩니다.
 
 - `hwp`, `hwpx`, `한글 파일`, `한글 문서`, `한컴`
 - `공문`, `기안문`, `양식 채우기`
