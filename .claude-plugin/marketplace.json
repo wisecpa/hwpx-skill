@@ -1,0 +1,12 @@
+{
+  "name": "세무회계 현지 플러그인",
+  "description": "세무회계 현지 내부 Claude Cowork 플러그인 모음",
+  "plugins": [
+    {
+      "id": "hwpx-skill",
+      "name": "HWPX 스킬",
+      "description": "한글(HWP/HWPX) 문서 생성·편집·양식 자동화 스킬. hwp, hwpx, 한글 파일 작업 시 자동 활성화됩니다.",
+      "path": "."
+    }
+  ]
+}
